@@ -18,6 +18,8 @@ snapshots/
 venv/
 .env/
 .envrc
+.venv/
+.uv-cache/
 
 # IDE 文件
 .vscode/

@@ -1,159 +1,171 @@
-<!-- Copyright (C) 2026 Linsheng Yin, Heng Quan, Bojin Li, Yunpeng Din, Penghan Chen -->
-<!-- File purpose: Project overview, setup, usage, and licensing notes. -->
-
-# CV Safety System
-
-A computer-vision safety monitoring system for exhibition environments, combining **relic detection/tracking, human pose estimation, dangerous-object detection, and real-time alert visualization** in a single video pipeline.
-
-> The current default configuration treats `cup` as the protected relic class and `knife`, `scissors`, and `baseball bat` as dangerous classes (configurable in code).
-
-## Features
-
-- YOLOv7-tiny detection with lightweight multi-object tracking and relic selection logic
-- MediaPipe Pose 33-keypoint estimation
-- Relic fence intrusion detection plus dangerous-object/person association alerts
-- PySide6 desktop UI with alert list, status panel, and video overlays
-- Automatic first-run download for pose model and YOLO weights
-
-## Requirements
-
-- Python 3.10+
-- Linux / macOS / Windows (with camera access permissions)
-- Internet access for first-time model download
 
 
-## Installation
+# Safety System 展品防盗监控系统
+
+本项目是一套面向展品防盗场景的本机开发版安全监控系统。当前阶段先不做
+ESP32-S3、ESP32-CAM、红外传感器和 MPU6050 的开发板固件，而是在电脑本机
+完成可运行、可演示、可连接华为云 IoTDA 的版本。
+
+系统把 **展品检测/跟踪、人体姿态估计、危险物识别、三级报警状态管理、华为云
+MQTT 属性上报、Qt 可视化界面** 放在同一条视频处理流程里。
+
+> 当前默认把 `cup` 当作受保护展品类别，把 `knife`、`scissors`、`baseball bat`
+> 当作危险物类别。这些类别可以在代码中调整。
+
+## 功能
+
+- 使用 YOLOv7-tiny 做目标检测，并用轻量跟踪逻辑保持展品 ID 稳定。
+- 使用 MediaPipe Pose 输出 33 个人体关键点。
+- 支持选中展品并生成安全围栏，检测人体关键点是否侵入围栏。
+- 支持危险物与人员关联，识别“人携带危险物”的视觉风险。
+- 支持三级报警：
+  - `0`：安全。
+  - `1`：一级报警，本机按钮模拟红外传感器触发。
+  - `2`：二级报警，由视觉风险自动触发。
+  - `3`：三级报警，本机按钮模拟 MPU6050 检测到展品移动。
+- 支持将报警状态按华为云 IoTDA 属性上报格式发布到 MQTT Topic。
+- 提供 PySide6 桌面界面，包含视频画面、状态面板、报警列表、云端连接状态和模拟按钮。
+
+## 环境要求
+
+- Python 3.10 或 3.11。项目依赖中包含 MediaPipe，暂不建议使用 Python 3.12 及以上版本。
+- `uv`，用于创建虚拟环境、解析依赖和运行命令。
+- Linux、macOS 或 Windows，运行摄像头时需要授予摄像头权限。
+- 首次下载模型文件时需要联网。
+- 若要连接华为云，需要已注册 IoTDA 设备并拿到设备连接参数。
+
+## 安装
 
 ```bash
-# 1) Install dependencies
-pip install -r requirements.txt
+# 1. 安装 uv（如果本机还没有）
+# 2. 创建/同步项目虚拟环境
+uv sync
 
-# 2) Clone YOLOv7 repository
-# The current implementation dynamically imports inference utilities from this local folder.
+# 3. 克隆 YOLOv7 源码到项目根目录
+# 当前检测模块会动态导入这个本地目录里的推理工具。
 git clone --depth 1 https://github.com/WongKinYiu/yolov7.git
 ```
 
-## Quick Start
+
+## 快速运行
 
 ```bash
-# Recommended: launch the integrated PySide6 client
-python run.py --source 0
+# 推荐：启动 PySide6 本机客户端
+uv run python run.py --source 0
 ```
 
-Optional arguments:
+常用参数：
 
-- `--source`: camera index (for example, `0`) or video file path
-- `--conf`: YOLO confidence threshold (default: `0.25`)
-- `--pose-model`: pose model path (default: `models/pose_landmarker_full.task`)
-- `--yolo-model`: YOLO weights path (default: `models/yolov7-tiny.pt`)
-- `--alert-sound`: custom alert sound file path
-- `--mqtt-enabled`: publish local alarm states to Huawei Cloud IoTDA
+- `--source`：摄像头编号或视频文件路径，例如 `0`。
+- `--conf`：YOLO 置信度阈值，默认 `0.25`。
+- `--pose-model`：姿态模型路径，默认 `models/pose_landmarker_full.task`。
+- `--yolo-model`：YOLO 权重路径，默认 `models/yolov7-tiny.pt`。
+- `--alert-sound`：自定义报警声音文件路径。
+- `--mqtt-enabled`：启用华为云 IoTDA MQTT 属性上报。
+- `--mqtt-key-file`：华为云控制台下载的设备连接参数文件。
 
-## Local Development Mode
+## 本机开发模式
 
-The current implementation focuses on PC-based development before ESP32-S3,
-ESP32-CAM, infrared, and MPU6050 firmware work. The Qt client includes local
-buttons that simulate the hardware stages:
+当前阶段的目标是先把业务链路跑通：本机摄像头负责视觉二级报警，Qt 按钮模拟
+红外和 MPU6050 触发，报警状态可以上报到华为云。
 
-- `Trigger IR L1`: simulate the infrared proximity sensor and report level 1.
-- `Trigger MPU6050 L3`: simulate relic movement and report level 3.
-- `Restore Safe`: clear simulated sensor and vision alarm states.
-- `Resend State`: force one more report of the current alarm state.
+界面中的模拟按钮含义：
 
-Vision risks detected by the existing camera pipeline are reported as level 2.
-Alarm priority is level 3 (MPU6050) > level 2 (vision) > level 1 (infrared) >
-level 0 (safe).
+- `Trigger IR L1`：模拟红外传感器检测到有人靠近展品，上报一级报警。
+- `Trigger MPU6050 L3`：模拟 MPU6050 检测到展品被移动，上报三级报警。
+- `Restore Safe`：清除本机模拟传感器状态和视觉报警状态，上报安全状态。
+- `Resend State`：强制重发当前报警状态，便于检查云端数据刷新。
 
-Use Python 3.10 or 3.11 for the local environment:
+视觉模块检测到安全围栏侵入或危险物关联时，会自动触发二级报警。报警优先级为：
+三级 MPU6050 > 二级视觉 > 一级红外 > 安全。
+
+## 连接华为云 IoTDA
+
+如果已经从华为云控制台下载了设备连接参数文件，可以直接运行：
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-git clone --depth 1 https://github.com/WongKinYiu/yolov7.git
-python run.py --source 0
+uv run python run.py --source 0 --mqtt-enabled --mqtt-key-file /path/to/DEVICES-CONNECT-KEY-xxx.txt
 ```
 
-To connect the local client directly to Huawei Cloud IoTDA, create an MQTT
-product model with service ID `Security` and properties `alarm_level`,
-`ir_status`, `vision_status`, `imu_status`, and `message`. Then set these
-environment variables before launching:
+也可以用环境变量手动配置：
 
 ```bash
 export HUAWEI_IOTDA_HOST="your-iotda-mqtt-host"
 export HUAWEI_DEVICE_ID="your-device-id"
 export HUAWEI_DEVICE_SECRET="your-device-secret"
 export HUAWEI_SERVICE_ID="Security"
-python run.py --source 0 --mqtt-enabled
+uv run python run.py --source 0 --mqtt-enabled
 ```
 
-If you downloaded a Huawei device connection key file from the console, you can
-use it directly instead of exporting the connection fields manually:
+可选环境变量：
+
+- `HUAWEI_IOTDA_PORT`：MQTT 端口。普通 MQTT 默认 `1883`，MQTTS 通常为 `8883`。
+- `HUAWEI_IOTDA_TLS`：设为 `1` 时使用 MQTTS。
+- `HUAWEI_MQTT_CLIENT_ID`：手动指定 MQTT clientId。
+- `HUAWEI_MQTT_PASSWORD`：使用华为云连接参数文件里的预计算 password。
+
+## 其他入口
 
 ```bash
-python run.py --source 0 --mqtt-enabled --mqtt-key-file /path/to/DEVICES-CONNECT-KEY-xxx.txt
+# OpenCV 窗口版本的融合监控逻辑
+uv run python -m cv_safety_sys.monitoring.integrated_monitor --source 0
+
+# 直接启动 Qt 模块
+uv run python -m cv_safety_sys.ui.qt_monitor --source 0
+
+# 只调试检测和跟踪
+uv run python -m cv_safety_sys.detection.yolov7_tracker --source 0
 ```
 
-Optional MQTT settings:
-
-- `HUAWEI_IOTDA_PORT`: defaults to `1883`, or `8883` when TLS is enabled.
-- `HUAWEI_IOTDA_TLS`: set to `1` to use MQTT over TLS.
-- `HUAWEI_MQTT_CLIENT_ID`: override the MQTT client ID if your IoTDA device
-  authentication mode requires a specific client ID format.
-- `HUAWEI_MQTT_PASSWORD`: use a precomputed MQTT password from Huawei's
-  connection-parameter file instead of deriving one from the device secret.
-
-Development-board work is intentionally deferred. ESP32-S3 sensor firmware,
-ESP32-CAM low-power capture, board-to-board wakeup, and SD-card photo storage
-will be added in a later hardware phase.
-
-## Alternative Entry Points
+## 测试
 
 ```bash
-# Integrated monitoring logic with OpenCV window
-PYTHONPATH=src python -m cv_safety_sys.monitoring.integrated_monitor --source 0
-
-# Directly launch the Qt module
-PYTHONPATH=src python -m cv_safety_sys.ui.qt_monitor --source 0
-
-# Detector/tracker only (debug)
-PYTHONPATH=src python -m cv_safety_sys.detection.yolov7_tracker --source 0
+uv run python -m unittest discover -s tests
 ```
 
-## Repository Structure
+如果已经同步过环境，只想跳过依赖同步直接运行测试：
+
+```bash
+uv run --no-sync python -m unittest discover -s tests
+```
+
+## 目录结构
 
 ```text
 cv_safety_sys/
 ├── run.py
-├── requirements.txt
+├── pyproject.toml
+├── uv.lock
 ├── src/cv_safety_sys/
-│   ├── detection/           # YOLOv7 detection and tracking
-│   ├── monitoring/          # Relic + pose + dangerous-object safety logic
-│   ├── pose/                # MediaPipe pose model download helper
-│   ├── ui/                  # PySide6 client
-│   └── utils/               # Utilities (for example, text rendering)
-└── docs/                    # Architecture and module documentation
+│   ├── alarm/               # 三级报警状态机与华为云 MQTT 上报
+│   ├── detection/           # YOLOv7 检测和跟踪
+│   ├── monitoring/          # 展品、姿态、危险物融合逻辑
+│   ├── pose/                # MediaPipe 姿态模型下载辅助
+│   ├── ui/                  # PySide6 本机客户端
+│   └── utils/               # 文本渲染等工具
+└── docs/                    # 中文说明文档
 ```
 
-## Documentation
+## 文档
 
-- System architecture: `docs/system_architecture.md`
-- Relic protection workflow: `docs/object_protection.md`
-- Pose module guide: `docs/webcam_pose_detection.md`
+- 系统架构：[docs/system_architecture.md](docs/system_architecture.md)
+- 展品保护与视觉融合：[docs/object_protection.md](docs/object_protection.md)
+- 姿态检测模块：[docs/webcam_pose_detection.md](docs/webcam_pose_detection.md)
+- 华为云云端配置建议：[docs/huawei_iotda_setup.md](docs/huawei_iotda_setup.md)
+- 本机模拟说明：[docs/local_simulation.md](docs/local_simulation.md)
 
-## License
+## 当前未做的开发板内容
 
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
-You may copy, modify, and redistribute this project under the terms of GPL-3.0.
-See the [LICENSE](./LICENSE) file for details.
+当前版本将部分开发板开发修改为本地开发来实现完整逻辑实现，不包含：
 
-## Open Source Notice
+- ESP32-S3 读取真实红外传感器和 MPU6050。
+- ESP32-CAM 低功耗唤醒、拍照、SD 卡存图。
+- ESP32-S3 与 ESP32-CAM 之间的唤醒或通信协议。
+- 真实传感器阈值标定和硬件抗干扰设计。
 
-This project is released under GPL-3.0.
-You may use, modify, and redistribute it under GPL-3.0 conditions.
-If you distribute modified versions, you are generally required to provide corresponding source code under GPL-compatible terms.
-See [LICENSE](./LICENSE) for full terms.
+这些内容应在本机业务链路稳定后作为硬件阶段继续实现。
 
-## Copyright
+## 许可证
 
-Copyright (C) 2025 Linsheng Yin, Heng Quan, Bojin Li, Yunpeng Din, Penghan Chen
+本项目使用 GNU General Public License v3.0（GPL-3.0）。你可以按照 GPL-3.0
+条款复制、修改和再分发本项目。完整条款见 [LICENSE](./LICENSE)。

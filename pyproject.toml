@@ -1,0 +1,50 @@
+[project]
+name = "cv-safety-system"
+version = "0.1.0"
+description = "Local-first computer-vision theft alarm system for exhibition safety monitoring."
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+license = { text = "GPL-3.0-only" }
+authors = [
+    { name = "Linsheng Yin" },
+    { name = "Heng Quan" },
+    { name = "Bojin Li" },
+    { name = "Yunpeng Din" },
+    { name = "Penghan Chen" },
+]
+dependencies = [
+    "mediapipe>=0.10.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.21.0,<1.24.0",
+    "Pillow>=7.1.2",
+    "requests>=2.23.0",
+    "PyYAML>=5.3.1",
+    "scipy>=1.4.1",
+    "tqdm>=4.41.0",
+    "protobuf>=4.21.3",
+    "matplotlib>=3.2.2",
+    "psutil",
+    "thop",
+    "torch>=1.7.0,!=1.12.0",
+    "torchvision>=0.8.1,!=0.13.0",
+    "pandas",
+    "seaborn",
+    "PySide6>=6.5.0",
+    "paho-mqtt>=2.0.0",
+]
+
+[project.scripts]
+cv-safety-system = "cv_safety_sys.ui.qt_monitor:main"
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

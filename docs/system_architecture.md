@@ -1,55 +1,60 @@
 <!-- Copyright (C) 2026 Linsheng Yin, Heng Quan, Bojin Li, Yunpeng Din, Penghan Chen -->
-<!-- File purpose: High-level architecture, module boundaries, and data flow. -->
+<!-- File purpose: 中文系统架构、模块边界和数据流说明。 -->
 
-# System Architecture
+# 系统架构
 
-This project performs real-time safety monitoring by combining **protected relics, human pose landmarks, and dangerous objects**.
+本项目当前是“本机优先”的展品防盗监控系统。它把受保护展品、人体姿态、
+危险物识别、三级报警状态和华为云 IoTDA 上报整合到一条实时视频流程里。
 
-The main runtime pipeline is:
+主流程如下：
 
-**Video Input → Detection/Tracking → Pose Estimation → Safety Fusion Logic → UI/Alerts**
+**视频输入 → 目标检测/跟踪 → 姿态估计 → 安全融合判断 → 三级报警状态 → 华为云上报 → UI 展示**
 
-## Modules and Responsibilities
+## 模块职责
 
-| Module | Key File | Responsibility |
+| 模块 | 关键文件 | 职责 |
 | --- | --- | --- |
-| Startup and resource checks | `run.py` | Validates local `yolov7/` repository, prepares model paths, and launches the Qt client. |
-| Detection and tracking | `src/cv_safety_sys/detection/yolov7_tracker.py` | Runs YOLOv7-tiny detection, class filtering, `SimpleTracker`, and relic selection interaction. |
-| Pose model management | `src/cv_safety_sys/pose/model_downloader.py` | Downloads and caches the MediaPipe Pose Landmarker model. |
-| Safety fusion logic | `src/cv_safety_sys/monitoring/integrated_monitor.py` | Fuses person/relic/dangerous-object detections with pose points and produces fences, alerts, and stats. |
-| Alarm state and cloud reporting | `src/cv_safety_sys/alarm/` | Applies three-level alarm priority and optionally publishes Huawei Cloud IoTDA property JSON over MQTT. |
-| Visualization and interaction | `src/cv_safety_sys/ui/qt_monitor.py` | Implements PySide6 UI, video panel, alert list, local sensor simulation controls, status widgets, and mouse/keyboard interactions. |
+| 启动与资源检查 | `run.py` | 检查本地 `yolov7/` 目录，准备模型路径，启动 Qt 客户端。 |
+| 检测与跟踪 | `src/cv_safety_sys/detection/yolov7_tracker.py` | 运行 YOLOv7-tiny，过滤类别，跟踪展品 ID，支持展品选择。 |
+| 姿态模型管理 | `src/cv_safety_sys/pose/model_downloader.py` | 下载并缓存 MediaPipe Pose Landmarker 模型。 |
+| 安全融合逻辑 | `src/cv_safety_sys/monitoring/integrated_monitor.py` | 融合展品、人体、危险物和姿态关键点，生成视觉风险。 |
+| 报警状态与云端上报 | `src/cv_safety_sys/alarm/` | 管理三级报警优先级，按华为云 IoTDA 属性格式发布 MQTT JSON。 |
+| 可视化与交互 | `src/cv_safety_sys/ui/qt_monitor.py` | 展示视频、状态、报警列表、云端连接状态，并提供本机模拟按钮。 |
 
-## Data Flow
+## 数据流
 
-1. **Video capture**: OpenCV reads frames from a camera or a video file.
-2. **Detection and class filtering**: YOLOv7 outputs bounding boxes and classes, including `cup`, `person`, and configured dangerous classes.
-3. **Tracking**: `SimpleTracker` maintains stable `track_id`s across frames.
-4. **Pose estimation**: MediaPipe Pose produces 33 keypoints and associates pose entries to person detections via IoU.
-5. **Safety logic**:
-   - Build protection fences around selected relics.
-   - Detect whether human keypoints enter the fenced region.
-   - Associate dangerous objects to nearby persons and escalate alert severity.
-6. **Alarm state**: Convert local infrared simulation, vision risks, and MPU6050 simulation into levels 1, 2, and 3, with level 3 taking priority.
-7. **Cloud reporting**: When `--mqtt-enabled` is set, publish Huawei Cloud IoTDA device properties to `$oc/devices/{device_id}/sys/properties/report`.
-8. **Output rendering**: Push structured status/alerts to OpenCV/Qt views and update alert history and counters.
+1. **视频采集**：OpenCV 从摄像头或视频文件读取画面。
+2. **目标检测**：YOLOv7 输出展品、人员、危险物等检测框。
+3. **目标跟踪**：`SimpleTracker` 给展品和人员维持稳定的 `track_id`。
+4. **姿态估计**：MediaPipe Pose 输出 33 个关键点，并通过 IoU 关联到人员检测框。
+5. **视觉安全判断**：
+   - 对选中的展品生成安全围栏。
+   - 判断人体关键点是否进入安全围栏。
+   - 判断危险物是否与某个人有关联。
+6. **报警状态合成**：
+   - Qt 按钮模拟红外触发，形成一级报警。
+   - 视觉安全判断产生风险，形成二级报警。
+   - Qt 按钮模拟 MPU6050 触发，形成三级报警。
+   - 优先级固定为三级 > 二级 > 一级 > 安全。
+7. **云端上报**：启用 `--mqtt-enabled` 后，系统向华为云 IoTDA Topic
+   `$oc/devices/{device_id}/sys/properties/report` 发布属性 JSON。
+8. **界面展示**：Qt 界面显示视频叠加层、报警状态、MQTT 状态、最近报警和统计信息。
 
-## Runtime Entry Points
+## 运行入口
 
-- `python run.py --source 0`: recommended integrated desktop client.
-- `python run.py --source 0 --mqtt-enabled`: desktop client with Huawei Cloud IoTDA MQTT property reporting enabled.
-- `PYTHONPATH=src python -m cv_safety_sys.monitoring.integrated_monitor --source 0`: OpenCV monitoring view.
-- `PYTHONPATH=src python -m cv_safety_sys.ui.qt_monitor --source 0`: direct Qt module entry.
+- `uv run python run.py --source 0`：推荐的本机 Qt 客户端。
+- `uv run python run.py --source 0 --mqtt-enabled --mqtt-key-file <连接参数文件>`：启用华为云 IoTDA 上报。
+- `uv run python -m cv_safety_sys.monitoring.integrated_monitor --source 0`：OpenCV 窗口版监控。
+- `uv run python -m cv_safety_sys.ui.qt_monitor --source 0`：直接启动 Qt 模块。
 
-## Local-First Alarm Scope
+## 本阶段范围
 
-The current phase does not implement ESP32-S3 firmware, ESP32-CAM low-power capture,
-or physical infrared/MPU6050 sensor reads. The Qt client provides local simulation
-buttons for level 1 and level 3 alarms while the existing vision pipeline provides
-level 2 alarms.
+当前阶段不读取真实红外传感器和 MPU6050，也不控制 ESP32-CAM 低功耗拍照。
+这些硬件动作先由本机 UI 和视觉模块模拟或替代，目的是先验证业务流程、报警优先级、
+JSON 上报格式和华为云连接。
 
-## Models and Dependencies
+## 模型与依赖
 
-- Default YOLO weights path: `models/yolov7-tiny.pt`
-- Default pose model path: `models/pose_landmarker_full.task`
-- YOLO inference code folder: repository root `yolov7/` (must be cloned manually)
+- 默认 YOLO 权重路径：`models/yolov7-tiny.pt`
+- 默认姿态模型路径：`models/pose_landmarker_full.task`
+- YOLO 推理源码目录：项目根目录下的 `yolov7/`，需要手动克隆或提前放好。
