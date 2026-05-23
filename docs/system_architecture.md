@@ -15,6 +15,8 @@
 | 模块 | 关键文件 | 职责 |
 | --- | --- | --- |
 | 启动与资源检查 | `run.py` | 检查本地 `yolov7/` 目录，准备模型路径，启动 Qt 客户端。 |
+| 设备逻辑 | `src/cv_safety_sys/devices/` | 实现 GY-521/MPU6050 和 TCRT5000 的纯代码判断逻辑，不直接访问真实硬件。 |
+| 开发板示例 | `firmware/esp32_s3_security_node/` | 提供 ESP32-S3 Arduino C/C++ 传感器读取和 MQTT 上报示例，尚未实物调试。 |
 | 检测与跟踪 | `src/cv_safety_sys/detection/yolov7_tracker.py` | 运行 YOLOv7-tiny，过滤类别，跟踪展品 ID，支持展品选择。 |
 | 姿态模型管理 | `src/cv_safety_sys/pose/model_downloader.py` | 下载并缓存 MediaPipe Pose Landmarker 模型。 |
 | 安全融合逻辑 | `src/cv_safety_sys/monitoring/integrated_monitor.py` | 融合展品、人体、危险物和姿态关键点，生成视觉风险。 |
@@ -32,9 +34,9 @@
    - 判断人体关键点是否进入安全围栏。
    - 判断危险物是否与某个人有关联。
 6. **报警状态合成**：
-   - Qt 按钮模拟红外触发，形成一级报警。
+   - TCRT5000 设备逻辑或 Qt 按钮模拟红外触发，形成一级报警。
    - 视觉安全判断产生风险，形成二级报警。
-   - Qt 按钮模拟 MPU6050 触发，形成三级报警。
+   - GY-521/MPU6050 设备逻辑或 Qt 按钮模拟移动触发，形成三级报警。
    - 优先级固定为三级 > 二级 > 一级 > 安全。
 7. **云端上报**：启用 `--mqtt-enabled` 后，系统向华为云 IoTDA Topic
    `$oc/devices/{device_id}/sys/properties/report` 发布属性 JSON。

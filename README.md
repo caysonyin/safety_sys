@@ -25,6 +25,8 @@ MQTT 属性上报、Qt 可视化界面** 放在同一条视频处理流程里。
   - `3`：三级报警，本机按钮模拟 MPU6050 检测到展品移动。
 - 支持将报警状态按华为云 IoTDA 属性上报格式发布到 MQTT Topic。
 - 提供 PySide6 桌面界面，包含视频画面、状态面板、报警列表、云端连接状态和模拟按钮。
+- 新增 GY-521/MPU6050 与 TCRT5000 的纯代码逻辑模块，当前不访问真实硬件，后续可接入 I2C/GPIO 适配器。
+- 提供 ESP32-S3 Arduino C/C++ 示例代码，后续可作为开发板端传感器节点的起点。
 
 ## 环境要求
 
@@ -136,8 +138,11 @@ cv_safety_sys/
 ├── run.py
 ├── pyproject.toml
 ├── uv.lock
+├── firmware/
+│   └── esp32_s3_security_node/ # ESP32-S3 传感器节点 Arduino 示例
 ├── src/cv_safety_sys/
 │   ├── alarm/               # 三级报警状态机与华为云 MQTT 上报
+│   ├── devices/             # MPU6050/GY-521 与 TCRT5000 的设备逻辑
 │   ├── detection/           # YOLOv7 检测和跟踪
 │   ├── monitoring/          # 展品、姿态、危险物融合逻辑
 │   ├── pose/                # MediaPipe 姿态模型下载辅助
@@ -153,12 +158,16 @@ cv_safety_sys/
 - 姿态检测模块：[docs/webcam_pose_detection.md](docs/webcam_pose_detection.md)
 - 华为云云端配置建议：[docs/huawei_iotda_setup.md](docs/huawei_iotda_setup.md)
 - 本机模拟说明：[docs/local_simulation.md](docs/local_simulation.md)
+- 设备逻辑模块说明：[docs/device_logic.md](docs/device_logic.md)
+- ESP32-S3 传感器节点示例：[firmware/esp32_s3_security_node/README.md](firmware/esp32_s3_security_node/README.md)
 
 ## 当前未做的开发板内容
 
-当前版本将部分开发板开发修改为本地开发来实现完整逻辑实现，不包含：
+当前版本将部分开发板开发修改为本地开发来实现完整逻辑实现。已经包含
+MPU6050/GY-521 与 TCRT5000 的阈值判断、防抖和报警转换逻辑，并提供未实测的
+ESP32-S3 Arduino 示例代码。但当前仍不包含：
 
-- ESP32-S3 读取真实红外传感器和 MPU6050。
+- ESP32-S3 通过真实 GPIO/I2C 读取红外传感器和 MPU6050。
 - ESP32-CAM 低功耗唤醒、拍照、SD 卡存图。
 - ESP32-S3 与 ESP32-CAM 之间的唤醒或通信协议。
 - 真实传感器阈值标定和硬件抗干扰设计。

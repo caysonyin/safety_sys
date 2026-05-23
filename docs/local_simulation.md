@@ -6,6 +6,9 @@
 当前阶段先不开发 ESP32-S3、ESP32-CAM、红外传感器和 MPU6050 固件。为了先验证
 业务流程，系统在电脑本机用 Qt 按钮和摄像头视觉算法模拟完整三级报警链路。
 
+代码层面已经加入 GY-521/MPU6050 和 TCRT5000 的纯逻辑模块。它们只处理“读数
+如何变成报警状态”，不直接访问 I2C、GPIO 或真实开发板。
+
 ## 哪些硬件被本机替代
 
 | 原计划硬件或动作 | 真实项目中的作用 | 当前本机实现 |
@@ -38,6 +41,10 @@
 
 ## 代码中对应的位置
 
+- 设备逻辑：`src/cv_safety_sys/devices/`
+  - `tcrt5000.py`：TCRT5000 数字/模拟读数、防抖、靠近判断。
+  - `mpu6050.py`：GY-521/MPU6050 加速度和陀螺仪阈值判断。
+  - `controller.py`：把传感器状态转换成 `AlarmManager` 的一级/三级报警。
 - 按钮触发逻辑：`src/cv_safety_sys/ui/qt_monitor.py`
   - `on_trigger_ir_alarm`
   - `on_trigger_imu_alarm`
@@ -60,9 +67,10 @@
 后续接开发板时，不需要推翻当前状态机。推荐做法是：
 
 1. ESP32-S3 负责读取红外和 MPU6050。
-2. ESP32-S3 把传感器事件通过 MQTT、HTTP 或串口发给电脑本机程序，或直接上报华为云。
+2. 为 ESP32-S3 或电脑端新增读数适配器，把 GPIO/I2C 原始数据转换成
+   `TCRT5000Reading` 和 `MPU6050Reading`。
 3. 如果仍由电脑统一上报云端，只需要新增一个“硬件事件输入层”，调用现有
-   `AlarmManager.trigger_ir()` 和 `AlarmManager.trigger_imu()`。
+   `SensorAlarmController.update()`。
 4. 如果由 ESP32-S3 直接上报云端，则要保证它生成的 JSON 字段和本机程序一致。
 
 这样本机阶段验证过的云端产品模型、报警字段和优先级规则可以继续复用。
