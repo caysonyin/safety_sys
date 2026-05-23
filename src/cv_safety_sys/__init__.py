@@ -2,6 +2,12 @@
 # File purpose:   init   module.
 """CV Safety System Python package."""
 
-from .monitoring.integrated_monitor import IntegratedSafetyMonitor
-
 __all__ = ["IntegratedSafetyMonitor"]
+
+
+def __getattr__(name: str):
+    if name == "IntegratedSafetyMonitor":
+        from .monitoring.integrated_monitor import IntegratedSafetyMonitor
+
+        return IntegratedSafetyMonitor
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

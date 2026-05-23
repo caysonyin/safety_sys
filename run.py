@@ -72,6 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--pose-model', type=str, default=str(DEFAULT_POSE_MODEL_PATH), help='Pose model path')
     parser.add_argument('--yolo-model', type=str, default=str(DEFAULT_YOLO_MODEL_PATH), help='YOLO model path')
     parser.add_argument('--alert-sound', type=str, default=None, help='Optional alert sound file path')
+    parser.add_argument('--mqtt-enabled', action='store_true', help='Publish alarm properties to Huawei Cloud IoTDA')
+    parser.add_argument('--mqtt-key-file', type=str, default=None, help='Huawei IoTDA device connection key JSON file')
     return parser.parse_args()
 
 
@@ -83,7 +85,13 @@ def main() -> None:
     pose_model_path = ensure_pose_model(Path(args.pose_model))
     yolo_model_path = ensure_yolo_model(Path(args.yolo_model))
 
-    monitor = prepare_monitor(args.conf, pose_model_path, yolo_model_path)
+    monitor = prepare_monitor(
+        args.conf,
+        pose_model_path,
+        yolo_model_path,
+        mqtt_enabled=args.mqtt_enabled,
+        mqtt_key_file=Path(args.mqtt_key_file) if args.mqtt_key_file else None,
+    )
 
     video_source: int | str = int(args.source) if args.source.isdigit() else args.source
     alert_sound = Path(args.alert_sound) if args.alert_sound else None

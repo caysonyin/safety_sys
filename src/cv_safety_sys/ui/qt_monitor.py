@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from cv_safety_sys.monitoring.integrated_monitor import IntegratedSafetyMonitor
+from cv_safety_sys.alarm import AlarmManager, HuaweiIoTDAConfig, HuaweiIoTDAPublisher
 from cv_safety_sys.pose.model_downloader import (
     DEFAULT_MODEL_PATH as DEFAULT_POSE_MODEL_PATH,
     download_model as download_pose_model,
@@ -294,6 +295,7 @@ class MonitorWorker(QThread):
             self.error_occurred.emit(str(exc))
         finally:
             cap.release()
+            self.monitor.close()
 
     def stop(self) -> None:
         self._running = False
@@ -332,6 +334,14 @@ class SafetyMonitorWindow(QMainWindow):
         self.intrusion_value = QLabel("0")
         self.dangerous_value = QLabel("0")
         self.fence_value = QLabel("0")
+        self.alarm_level_value = QLabel("0 - Safe")
+        self.alarm_source_value = QLabel("-")
+        self.alarm_message_value = QLabel("-")
+        self.alarm_message_value.setWordWrap(True)
+        self.alarm_publish_value = QLabel("-")
+        self.mqtt_status_value = QLabel("disabled")
+        self.mqtt_error_value = QLabel("-")
+        self.mqtt_error_value.setWordWrap(True)
         self.toast_label = QLabel()
         self.toast_label.setWordWrap(True)
         self.toast_label.hide()
@@ -389,6 +399,38 @@ class SafetyMonitorWindow(QMainWindow):
         status_form.addRow("Danger-carry events", self.dangerous_value)
         status_group.setLayout(status_form)
 
+        alarm_group = QGroupBox("Three-level alarm")
+        alarm_group.setStyleSheet("QGroupBox { color: #f7d27b; font-weight: bold; }")
+        alarm_layout = QVBoxLayout()
+        alarm_form = QFormLayout()
+        alarm_form.addRow("Alarm level", self.alarm_level_value)
+        alarm_form.addRow("Source", self.alarm_source_value)
+        alarm_form.addRow("Message", self.alarm_message_value)
+        alarm_form.addRow("Last report", self.alarm_publish_value)
+        alarm_form.addRow("MQTT status", self.mqtt_status_value)
+        alarm_form.addRow("MQTT error", self.mqtt_error_value)
+
+        sensor_button_row = QHBoxLayout()
+        self.ir_alarm_button = QPushButton("Trigger IR L1")
+        self.ir_alarm_button.clicked.connect(self.on_trigger_ir_alarm)
+        self.imu_alarm_button = QPushButton("Trigger MPU6050 L3")
+        self.imu_alarm_button.clicked.connect(self.on_trigger_imu_alarm)
+        sensor_button_row.addWidget(self.ir_alarm_button)
+        sensor_button_row.addWidget(self.imu_alarm_button)
+
+        alarm_action_row = QHBoxLayout()
+        self.safe_alarm_button = QPushButton("Restore Safe")
+        self.safe_alarm_button.clicked.connect(self.on_restore_safe_alarm)
+        self.resend_alarm_button = QPushButton("Resend State")
+        self.resend_alarm_button.clicked.connect(self.on_resend_alarm_state)
+        alarm_action_row.addWidget(self.safe_alarm_button)
+        alarm_action_row.addWidget(self.resend_alarm_button)
+
+        alarm_layout.addLayout(alarm_form)
+        alarm_layout.addLayout(sensor_button_row)
+        alarm_layout.addLayout(alarm_action_row)
+        alarm_group.setLayout(alarm_layout)
+
         alert_group = QGroupBox("Latest alerts")
         alert_group.setStyleSheet("QGroupBox { color: #ffb0b0; font-weight: bold; }")
         alert_layout = QVBoxLayout()
@@ -421,6 +463,7 @@ class SafetyMonitorWindow(QMainWindow):
         snapshot_row.addWidget(self.exit_button)
 
         sidebar.addWidget(status_group)
+        sidebar.addWidget(alarm_group)
         sidebar.addWidget(alert_group)
         sidebar.addWidget(banner_group)
         sidebar.addWidget(self.toast_label)
@@ -527,6 +570,24 @@ class SafetyMonitorWindow(QMainWindow):
         else:
             QMessageBox.information(self, "Notice", "Matching alert not found (it may already be dismissed).")
 
+    def on_trigger_ir_alarm(self) -> None:
+        with self.worker.monitor_lock:
+            self.monitor.trigger_ir_alarm()
+        QApplication.beep()
+
+    def on_trigger_imu_alarm(self) -> None:
+        with self.worker.monitor_lock:
+            self.monitor.trigger_imu_alarm()
+        QApplication.beep()
+
+    def on_restore_safe_alarm(self) -> None:
+        with self.worker.monitor_lock:
+            self.monitor.restore_safe_alarm()
+
+    def on_resend_alarm_state(self) -> None:
+        with self.worker.monitor_lock:
+            self.monitor.resend_alarm_state()
+
     def _compose_drag_bbox(self, x: int, y: int) -> List[int] | None:
         state = self._fence_drag_state
         if not state:
@@ -592,6 +653,12 @@ class SafetyMonitorWindow(QMainWindow):
         mins, secs = divmod(seconds, 60)
         return f"{mins:02d}:{secs:02d}"
 
+    def _format_alarm_time(self, value: object) -> str:
+        if not value:
+            return "-"
+        text = str(value)
+        return text.replace("T", " ").replace("+00:00", " UTC")
+
     def _update_status_panel(self, status: Dict[str, object]) -> None:
         stage_map = {
             'selection': "Relic selection stage",
@@ -611,6 +678,27 @@ class SafetyMonitorWindow(QMainWindow):
         self.alert_total_value.setText(str(status.get('total_alerts', 0)))
         self.intrusion_value.setText(str(status.get('total_intrusions', 0)))
         self.dangerous_value.setText(str(status.get('total_dangerous_flags', 0)))
+
+        alarm = status.get('alarm', {})
+        if isinstance(alarm, dict):
+            level = int(alarm.get('level', 0))
+            level_map = {
+                0: "0 - Safe",
+                1: "1 - Infrared",
+                2: "2 - Vision",
+                3: "3 - MPU6050",
+            }
+            self.alarm_level_value.setText(level_map.get(level, str(level)))
+            self.alarm_source_value.setText(str(alarm.get('source') or "-"))
+            self.alarm_message_value.setText(str(alarm.get('message') or "-"))
+            self.alarm_publish_value.setText(
+                self._format_alarm_time(alarm.get('last_publish_time'))
+            )
+            mqtt_status = str(alarm.get('mqtt_status') or "disabled")
+            if alarm.get('mqtt_enabled') and not alarm.get('mqtt_connected'):
+                mqtt_status = f"{mqtt_status} (offline)"
+            self.mqtt_status_value.setText(mqtt_status)
+            self.mqtt_error_value.setText(str(alarm.get('mqtt_last_error') or "-"))
 
         self.start_button.setEnabled(stage != 'monitoring')
 
@@ -645,6 +733,8 @@ def prepare_monitor(
     confidence: float,
     pose_model: Path | None,
     yolo_model: Path | None = None,
+    mqtt_enabled: bool = False,
+    mqtt_key_file: Path | None = None,
 ) -> IntegratedSafetyMonitor:
     pose_model_path = pose_model
     if pose_model_path is None or not pose_model_path.exists():
@@ -666,12 +756,31 @@ def prepare_monitor(
     if model is None or device is None:
         raise RuntimeError("Model loading failed")
 
+    mqtt_config = None
+    mqtt_error = None
+    if mqtt_enabled:
+        try:
+            if mqtt_key_file is not None:
+                mqtt_config = HuaweiIoTDAConfig.from_connection_key_file(mqtt_key_file)
+            else:
+                mqtt_config = HuaweiIoTDAConfig.from_env()
+        except ValueError as exc:
+            mqtt_error = str(exc)
+        except (OSError, KeyError) as exc:
+            mqtt_error = f"Failed to read Huawei IoTDA connection key file: {exc}"
+            mqtt_config = None
+    publisher = HuaweiIoTDAPublisher(mqtt_config, enabled=mqtt_enabled)
+    if mqtt_error:
+        publisher.last_error = mqtt_error
+    alarm_manager = AlarmManager(publisher)
+
     monitor = IntegratedSafetyMonitor(
         model,
         device,
         pose_model_path=str(pose_model_path),
         confidence_threshold=confidence,
         create_window=False,
+        alarm_manager=alarm_manager,
     )
     return monitor
 
@@ -683,6 +792,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--pose-model', type=str, default=str(DEFAULT_POSE_MODEL_PATH), help='Pose model path')
     parser.add_argument('--yolo-model', type=str, default=str(DEFAULT_YOLO_MODEL_PATH), help='YOLO model path')
     parser.add_argument('--alert-sound', type=str, default=None, help='Optional alert sound file path')
+    parser.add_argument('--mqtt-enabled', action='store_true', help='Publish alarm properties to Huawei Cloud IoTDA')
+    parser.add_argument('--mqtt-key-file', type=str, default=None, help='Huawei IoTDA device connection key JSON file')
     return parser.parse_args()
 
 
@@ -694,6 +805,8 @@ def main() -> None:
         args.conf,
         pose_model_path if pose_model_path.exists() else None,
         yolo_model_path if yolo_model_path.exists() else None,
+        mqtt_enabled=args.mqtt_enabled,
+        mqtt_key_file=Path(args.mqtt_key_file) if args.mqtt_key_file else None,
     )
 
     video_source: int | str = int(args.source) if args.source.isdigit() else args.source

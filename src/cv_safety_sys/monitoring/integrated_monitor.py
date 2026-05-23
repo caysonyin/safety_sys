@@ -32,6 +32,7 @@ from cv_safety_sys.detection.yolov7_tracker import (
     download_yolov7_tiny,
     load_model,
 )
+from cv_safety_sys.alarm import AlarmManager, HuaweiIoTDAConfig, HuaweiIoTDAPublisher
 from cv_safety_sys.pose.model_downloader import (
     DEFAULT_MODEL_PATH as DEFAULT_POSE_MODEL_PATH,
     download_model as download_pose_model,
@@ -148,6 +149,7 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
         pose_model_path: str,
         confidence_threshold: float = 0.1,
         create_window: bool = True,
+        alarm_manager: AlarmManager | None = None,
     ):
         super().__init__(
             model,
@@ -177,6 +179,7 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
         self.frame_count = 0
         self.last_frame_shape: Tuple[int, int, int] | None = None
         self.active_person_alerts: Dict[int, Dict[str, object]] = {}
+        self.alarm_manager = alarm_manager or AlarmManager()
 
     # ------------------------------------------------------------------
     # Data preparation
@@ -374,6 +377,36 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
     def acknowledge_alert(self, track_id: int) -> bool:
         removed = self.active_person_alerts.pop(track_id, None)
         return removed is not None
+
+    def trigger_ir_alarm(self) -> None:
+        """Simulate a local infrared proximity alarm."""
+
+        self.alarm_manager.trigger_ir()
+        self._show_toast("Infrared level-1 alarm triggered", (255, 180, 0), 2.0)
+
+    def trigger_imu_alarm(self) -> None:
+        """Simulate a local MPU6050 movement alarm."""
+
+        self.alarm_manager.trigger_imu()
+        self._show_toast("MPU6050 level-3 alarm triggered", (255, 70, 70), 2.0)
+
+    def restore_safe_alarm(self) -> None:
+        """Clear simulated sensor and vision alarm states."""
+
+        self.alarm_manager.restore_safe()
+        self._show_toast("Alarm state restored to safe", (0, 190, 120), 2.0)
+
+    def resend_alarm_state(self) -> None:
+        """Force resend of the current alarm state."""
+
+        self.alarm_manager.resend_current()
+        self._show_toast("Current alarm state resent", (0, 170, 255), 1.6)
+
+    def close(self) -> None:
+        """Release external resources owned by the monitor."""
+
+        self.pose_helper.close()
+        self.alarm_manager.close()
 
     # ------------------------------------------------------------------
     # Rendering and display
@@ -589,6 +622,13 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
         else:
             alerts = self._analyse_risks()
 
+        if self.workflow_stage == "selection":
+            self.alarm_manager.update_vision(False)
+        elif alerts:
+            self.alarm_manager.update_vision(True, alerts[0])
+        else:
+            self.alarm_manager.update_vision(False)
+
         canvas = self.draw_detections(frame, show_labels=False)
         self._draw_active_fence_overlay(canvas)
         self._draw_pose(canvas, pose_entries)
@@ -605,6 +645,7 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
                 if "carrying" in alert:
                     self.total_dangerous_flags += 1
 
+        alarm_snapshot = self.alarm_manager.snapshot()
         status = {
             'stage': self.workflow_stage,
             'monitoring_active': self.monitoring_active,
@@ -629,6 +670,24 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
             'session_duration': time.time() - self.session_start_time
             if self.monitoring_active
             else 0.0,
+            'alarm': {
+                'level': int(alarm_snapshot.alarm_level),
+                'ir_status': alarm_snapshot.ir_status,
+                'vision_status': alarm_snapshot.vision_status,
+                'imu_status': alarm_snapshot.imu_status,
+                'source': alarm_snapshot.source,
+                'message': alarm_snapshot.message,
+                'event_time': alarm_snapshot.event_time.isoformat()
+                if alarm_snapshot.event_time
+                else None,
+                'last_publish_time': alarm_snapshot.last_publish_time.isoformat()
+                if alarm_snapshot.last_publish_time
+                else None,
+                'mqtt_enabled': alarm_snapshot.mqtt_enabled,
+                'mqtt_connected': alarm_snapshot.mqtt_connected,
+                'mqtt_status': alarm_snapshot.mqtt_status,
+                'mqtt_last_error': alarm_snapshot.mqtt_last_error,
+            },
             'toast': {
                 'message': self.toast_message,
                 'color': self.toast_color,
@@ -725,7 +784,7 @@ class IntegratedSafetyMonitor(VideoRelicTracker):
 
         finally:
             cap.release()
-            self.pose_helper.close()
+            self.close()
             cv2.destroyAllWindows()
 
 
@@ -735,6 +794,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--conf', type=float, default=0.25, help='YOLOConfidence threshold')
     parser.add_argument('--pose-model', type=str, default=str(DEFAULT_POSE_MODEL_PATH), help='Pose model path')
     parser.add_argument('--yolo-model', type=str, default=str(DEFAULT_YOLO_MODEL_PATH), help='YOLO model path')
+    parser.add_argument('--mqtt-enabled', action='store_true', help='Publish alarm properties to Huawei Cloud IoTDA')
+    parser.add_argument('--mqtt-key-file', type=str, default=None, help='Huawei IoTDA device connection key JSON file')
     return parser.parse_args()
 
 
@@ -761,11 +822,29 @@ def main() -> None:
 
     video_source: int | str = int(args.source) if args.source.isdigit() else args.source
 
+    mqtt_config = None
+    mqtt_error = None
+    if args.mqtt_enabled:
+        try:
+            if args.mqtt_key_file:
+                mqtt_config = HuaweiIoTDAConfig.from_connection_key_file(Path(args.mqtt_key_file))
+            else:
+                mqtt_config = HuaweiIoTDAConfig.from_env()
+        except ValueError as exc:
+            mqtt_error = str(exc)
+        except (OSError, KeyError) as exc:
+            mqtt_error = f"Failed to read Huawei IoTDA connection key file: {exc}"
+            mqtt_config = None
+    publisher = HuaweiIoTDAPublisher(mqtt_config, enabled=args.mqtt_enabled)
+    if mqtt_error:
+        publisher.last_error = mqtt_error
+
     monitor = IntegratedSafetyMonitor(
         model,
         device,
         pose_model_path=str(pose_model_path),
         confidence_threshold=args.conf,
+        alarm_manager=AlarmManager(publisher),
     )
 
     try:

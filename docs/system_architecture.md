@@ -17,7 +17,8 @@ The main runtime pipeline is:
 | Detection and tracking | `src/cv_safety_sys/detection/yolov7_tracker.py` | Runs YOLOv7-tiny detection, class filtering, `SimpleTracker`, and relic selection interaction. |
 | Pose model management | `src/cv_safety_sys/pose/model_downloader.py` | Downloads and caches the MediaPipe Pose Landmarker model. |
 | Safety fusion logic | `src/cv_safety_sys/monitoring/integrated_monitor.py` | Fuses person/relic/dangerous-object detections with pose points and produces fences, alerts, and stats. |
-| Visualization and interaction | `src/cv_safety_sys/ui/qt_monitor.py` | Implements PySide6 UI, video panel, alert list, status widgets, and mouse/keyboard interactions. |
+| Alarm state and cloud reporting | `src/cv_safety_sys/alarm/` | Applies three-level alarm priority and optionally publishes Huawei Cloud IoTDA property JSON over MQTT. |
+| Visualization and interaction | `src/cv_safety_sys/ui/qt_monitor.py` | Implements PySide6 UI, video panel, alert list, local sensor simulation controls, status widgets, and mouse/keyboard interactions. |
 
 ## Data Flow
 
@@ -29,13 +30,23 @@ The main runtime pipeline is:
    - Build protection fences around selected relics.
    - Detect whether human keypoints enter the fenced region.
    - Associate dangerous objects to nearby persons and escalate alert severity.
-6. **Output rendering**: Push structured status/alerts to OpenCV/Qt views and update alert history and counters.
+6. **Alarm state**: Convert local infrared simulation, vision risks, and MPU6050 simulation into levels 1, 2, and 3, with level 3 taking priority.
+7. **Cloud reporting**: When `--mqtt-enabled` is set, publish Huawei Cloud IoTDA device properties to `$oc/devices/{device_id}/sys/properties/report`.
+8. **Output rendering**: Push structured status/alerts to OpenCV/Qt views and update alert history and counters.
 
 ## Runtime Entry Points
 
 - `python run.py --source 0`: recommended integrated desktop client.
+- `python run.py --source 0 --mqtt-enabled`: desktop client with Huawei Cloud IoTDA MQTT property reporting enabled.
 - `PYTHONPATH=src python -m cv_safety_sys.monitoring.integrated_monitor --source 0`: OpenCV monitoring view.
 - `PYTHONPATH=src python -m cv_safety_sys.ui.qt_monitor --source 0`: direct Qt module entry.
+
+## Local-First Alarm Scope
+
+The current phase does not implement ESP32-S3 firmware, ESP32-CAM low-power capture,
+or physical infrared/MPU6050 sensor reads. The Qt client provides local simulation
+buttons for level 1 and level 3 alarms while the existing vision pipeline provides
+level 2 alarms.
 
 ## Models and Dependencies
 
